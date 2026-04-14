@@ -40,7 +40,14 @@
       color: #fff;
     }
 
-    /* ── A-Frame: tela cheia ──────────────────────── */
+    /* ── Container da cena AR ────────────────────── */
+    #ar-root {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+    }
+
+    /* ── A-Frame: tela cheia (injeta dentro de #ar-root) ── */
     a-scene {
       position: fixed !important;
       inset: 0 !important;
@@ -293,49 +300,13 @@
 
 
 <!-- ═══════════════════════════════════════════
-     CENA A-FRAME / AR.js
+     CONTAINER DA CENA AR
+     A <a-scene> é injetada aqui DINAMICAMENTE após
+     câmera + GPS serem concedidos pelo usuário.
+     Isso garante que o AR.js nunca pede permissão
+     antes do clique em "Iniciar".
      ═══════════════════════════════════════════ -->
-<a-scene
-  vr-mode-ui="enabled: false"
-  embedded
-  arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;"
-  renderer="antialias: true; alpha: true; logarithmicDepthBuffer: true;"
-  loading-screen="enabled: false"
->
-  <!-- gps-camera adicionado dinamicamente após permissão ser concedida -->
-  <a-camera id="ar-camera"></a-camera>
-
-  <!-- ▸ Marcador 3D do monumento -->
-  <a-entity
-    id="monument-entity"
-    gps-entity-place="latitude: -10.9172482; longitude: -37.0471308"
-    visible="false"
-  >
-    <!-- Coluna principal girando -->
-    <a-cylinder
-      height="8" radius="1.2"
-      color="#FF6600" opacity="0.6" transparent="true" side="double"
-      position="0 4 0"
-      animation="property: rotation; to: 0 360 0; dur: 8000; easing: linear; loop: true"
-    ></a-cylinder>
-
-    <!-- Cone/seta no topo pulsante -->
-    <a-cone
-      height="4" radius-bottom="1.8" radius-top="0"
-      color="#FF6600" opacity="0.75" transparent="true" side="double"
-      position="0 10 0"
-      animation="property: scale; from: 0.85 0.85 0.85; to: 1.15 1.15 1.15; dur: 1000; loop: true; dir: alternate; easing: easeInOutSine"
-    ></a-cone>
-
-    <!-- Halo base -->
-    <a-torus
-      radius="1.8" radius-tubular="0.1"
-      color="#ffaa33" opacity="0.4" transparent="true"
-      position="0 0.1 0"
-      animation="property: material.opacity; from: 0.1; to: 0.6; dur: 1300; loop: true; dir: alternate; easing: easeInOutSine"
-    ></a-torus>
-  </a-entity>
-</a-scene>
+<div id="ar-root"></div>
 
 
 <!-- ═══════════════════════════════════════════
@@ -659,8 +630,59 @@ function showGpsError(err) {
 }
 
 /* ─────────────────────────────────────────────────
+   Injeta a cena A-Frame dinamicamente
+   Chamado APÓS câmera + GPS serem concedidos.
+   ───────────────────────────────────────────────── */
+function injectARScene() {
+  var root = document.getElementById('ar-root');
+  if (!root || root.querySelector('a-scene')) return; /* evita dupla injeção */
+
+  /* Monta o HTML da cena como string — mais compatível com A-Frame do que
+     createElement, pois os custom elements são processados pelo parser HTML. */
+  root.innerHTML =
+    '<a-scene' +
+    '  vr-mode-ui="enabled: false"' +
+    '  embedded' +
+    '  arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;"' +
+    '  renderer="antialias: true; alpha: true; logarithmicDepthBuffer: true;"' +
+    '  loading-screen="enabled: false">' +
+
+    /* Câmera com GPS — incluída diretamente pois a permissão já foi concedida */
+    '<a-camera id="ar-camera" gps-camera rotation-reader></a-camera>' +
+
+    /* Marcador 3D do monumento */
+    '<a-entity' +
+    '  id="monument-entity"' +
+    '  gps-entity-place="latitude: ' + MONUMENT_LAT + '; longitude: ' + MONUMENT_LNG + '"' +
+    '  visible="false">' +
+
+    /* Coluna girando */
+    '<a-cylinder height="8" radius="1.2"' +
+    '  color="#FF6600" opacity="0.6" transparent="true" side="double" position="0 4 0"' +
+    '  animation="property: rotation; to: 0 360 0; dur: 8000; easing: linear; loop: true">' +
+    '</a-cylinder>' +
+
+    /* Cone pulsante no topo */
+    '<a-cone height="4" radius-bottom="1.8" radius-top="0"' +
+    '  color="#FF6600" opacity="0.75" transparent="true" side="double" position="0 10 0"' +
+    '  animation="property: scale; from: 0.85 0.85 0.85; to: 1.15 1.15 1.15;' +
+    '             dur: 1000; loop: true; dir: alternate; easing: easeInOutSine">' +
+    '</a-cone>' +
+
+    /* Halo base */
+    '<a-torus radius="1.8" radius-tubular="0.1"' +
+    '  color="#ffaa33" opacity="0.4" transparent="true" position="0 0.1 0"' +
+    '  animation="property: material.opacity; from: 0.1; to: 0.6;' +
+    '             dur: 1300; loop: true; dir: alternate; easing: easeInOutSine">' +
+    '</a-torus>' +
+
+    '</a-entity>' +
+    '</a-scene>';
+}
+
+/* ─────────────────────────────────────────────────
    Botão INICIAR
-   Sequência: DeviceOrientation → GPS → AR.js → HUD
+   Sequência: câmera → GPS → DeviceOrientation → injetar cena → HUD
    ───────────────────────────────────────────────── */
 document.getElementById('start-btn').addEventListener('click', async function () {
   var btn  = document.getElementById('start-btn');
@@ -670,12 +692,33 @@ document.getElementById('start-btn').addEventListener('click', async function ()
   btn.textContent = '⏳ Aguardando…';
   btn.disabled    = true;
   if (hint) {
-    hint.style.color      = '';
-    hint.style.fontWeight = '';
+    hint.style.color = ''; hint.style.fontWeight = '';
     hint.textContent = 'Permita o acesso à câmera, localização e sensores de movimento.';
   }
 
-  /* 1 ── iOS 13+: permissão explícita de DeviceOrientation */
+  /* 1 ── CÂMERA — pedido explícito dentro do gesto do usuário.
+            Isso força o diálogo nativo do browser e dá ao AR.js
+            a permissão já concedida quando a cena for injetada.   */
+  if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+    try {
+      var stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' } }
+      });
+      /* Libera o stream — AR.js vai criar o seu próprio logo em seguida */
+      stream.getTracks().forEach(function (t) { t.stop(); });
+    } catch (camErr) {
+      if (hint) {
+        hint.style.color = '#ff6b6b'; hint.style.fontWeight = '600';
+        hint.textContent = camErr.name === 'NotAllowedError'
+          ? '📷 Câmera negada. Toque em 🔒 na barra do navegador → Câmera → Permitir. Recarregue.'
+          : '📷 Câmera indisponível: ' + camErr.message;
+      }
+      btn.textContent = '↺ Tentar novamente'; btn.disabled = false;
+      return;
+    }
+  }
+
+  /* 2 ── iOS 13+: permissão explícita de DeviceOrientation (giroscópio/bússola) */
   if (typeof DeviceOrientationEvent !== 'undefined' &&
       typeof DeviceOrientationEvent.requestPermission === 'function') {
     try {
@@ -684,7 +727,7 @@ document.getElementById('start-btn').addEventListener('click', async function ()
     } catch (e) { console.warn('[OrientPerm]', e); }
   }
 
-  /* 2 ── GPS: solicitado dentro do gesto do usuário para garantir o diálogo nativo */
+  /* 3 ── GPS — pedido dentro do gesto do usuário para garantir o diálogo nativo */
   try {
     await new Promise(function (resolve, reject) {
       navigator.geolocation.getCurrentPosition(resolve, reject, {
@@ -696,18 +739,18 @@ document.getElementById('start-btn').addEventListener('click', async function ()
     return;
   }
 
-  /* 3 ── Ativa bússola */
+  /* 4 ── Injeta a <a-scene> no DOM agora que todas as permissões estão OK.
+            AR.js encontrará câmera e GPS já autorizados e iniciará normalmente. */
+  injectARScene();
+
+  /* 5 ── Ativa bússola */
   window.addEventListener('deviceorientation', onDeviceOrientation, true);
 
-  /* 4 ── Ativa gps-camera do AR.js (agora que a permissão foi concedida) */
-  var cam = document.getElementById('ar-camera');
-  if (cam) cam.setAttribute('gps-camera', '');
-
-  /* 5 ── Mostra HUD, esconde tela inicial */
+  /* 6 ── Mostra HUD, esconde tela inicial */
   document.getElementById('start-screen').style.display = 'none';
   document.getElementById('hud').style.display = 'block';
 
-  /* 6 ── Inicia watcher de GPS */
+  /* 7 ── Inicia watcher de GPS para cálculos do HUD */
   setStatus('Aguardando GPS…', 'warn');
   startGPS();
 });
