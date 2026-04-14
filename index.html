@@ -717,23 +717,52 @@
   }
 
   /* ─────────────────────────────────────────────
-     Bússola — DeviceOrientationEvent
-     Trata iOS (webkitCompassHeading) e Android (alpha)
-     ───────────────────────────────────────────── */
-  function onDeviceOrientation(evt) {
-    app.compassAvailable = true;
+     Bússola — tratamento robusto iOS + Android
 
-    if (evt.webkitCompassHeading != null) {
+     PROBLEMA RAIZ:
+       deviceorientation.alpha no Android NÃO é relativo
+       ao Norte magnético por padrão — é relativo a uma
+       referência arbitrária definida quando a página carregou.
+       Por isso a seta "aponta para lugares diferentes" mesmo
+       com computeHeading correto.
+
+     SOLUÇÃO:
+       1. deviceorientationabsolute  → Android Chrome (alpha
+          relativo ao Norte geográfico, evt.absolute = true)
+       2. webkitCompassHeading       → iOS Safari (sempre correto)
+       3. deviceorientation.alpha    → fallback apenas se nenhum
+          dos anteriores estiver disponível
+     ───────────────────────────────────────────── */
+  var _absOrientReady = false; /* true quando recebemos um evento absolute */
+
+  function handleOrientationEvent(evt) {
+    /* Preferência: se já temos fonte absoluta, ignorar eventos relativos */
+    if (_absOrientReady && evt.absolute !== true) return;
+    if (evt.absolute === true) _absOrientReady = true;
+
+    var heading = null;
+
+    if (typeof evt.webkitCompassHeading === 'number' &&
+        !isNaN(evt.webkitCompassHeading)) {
       /* iOS Safari: já é heading clockwise from North [0, 360) */
-      app.compassHeading = evt.webkitCompassHeading;
-    } else if (evt.alpha != null) {
-      /* Chrome/Android: alpha cresce no sentido anti-horário
-         → inverte para obter heading clockwise from North     */
-      app.compassHeading = (360 - evt.alpha + 360) % 360;
+      heading = evt.webkitCompassHeading;
+
+    } else if (typeof evt.alpha === 'number' && !isNaN(evt.alpha)) {
+      /* Android (absolute ou fallback):
+         alpha cresce no sentido anti-horário a partir do Norte.
+         Inverte para obter heading clockwise from North.          */
+      heading = (360 - evt.alpha + 360) % 360;
     }
 
-    runCalculations();
+    if (heading !== null) {
+      app.compassAvailable = true;
+      app.compassHeading   = heading;
+      runCalculations();
+    }
   }
+
+  /* Mantém compatibilidade com chamadas legadas (start button) */
+  function onDeviceOrientation(evt) { handleOrientationEvent(evt); }
 
   /* ─────────────────────────────────────────────
      Painel informativo
@@ -836,7 +865,11 @@
     }
 
     /* 3 ── Registra listener de bússola */
-    window.addEventListener('deviceorientation', onDeviceOrientation, true);
+    /* Registra AMBOS os eventos:
+       - deviceorientationabsolute → Android Chrome (alpha relativo ao Norte)
+       - deviceorientation         → iOS Safari (webkitCompassHeading)       */
+    window.addEventListener('deviceorientationabsolute', handleOrientationEvent, true);
+    window.addEventListener('deviceorientation',         handleOrientationEvent, true);
 
     /* 4 ── Ativa o componente gps-camera do AR.js na câmera
             (agora que a permissão foi concedida, o watchPosition

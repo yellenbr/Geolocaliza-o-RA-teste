@@ -529,19 +529,48 @@ function runCalculations() {
 }
 
 /* ─────────────────────────────────────────────────
-   Bússola — DeviceOrientationEvent
-   Lida com iOS (webkitCompassHeading) e Android (alpha)
+   Bússola — tratamento robusto iOS + Android
+
+   PROBLEMA RAIZ:
+     deviceorientation.alpha no Android NÃO é relativo
+     ao Norte magnético — é relativo a uma referência
+     arbitrária definida no carregamento da página.
+     Resultado: seta aponta para lugares aleatórios.
+
+   SOLUÇÃO:
+     1. deviceorientationabsolute → Android Chrome
+        (evt.absolute = true, alpha desde o Norte geográfico)
+     2. webkitCompassHeading      → iOS Safari
+     3. deviceorientation.alpha   → fallback apenas se
+        nenhum dos anteriores estiver disponível
    ───────────────────────────────────────────────── */
-function onDeviceOrientation(evt) {
-  if (evt.webkitCompassHeading != null) {
-    /* iOS Safari: heading clockwise from North, já em [0,360) */
-    app.compassHeading = evt.webkitCompassHeading;
-  } else if (evt.alpha != null) {
-    /* Chrome/Android: alpha cresce anti-horário → inverte */
-    app.compassHeading = (360 - evt.alpha + 360) % 360;
+var _absOrientReady = false;
+
+function handleOrientationEvent(evt) {
+  /* Prefere fonte absoluta; descarta eventos relativos quando já tem absoluto */
+  if (_absOrientReady && evt.absolute !== true) return;
+  if (evt.absolute === true) _absOrientReady = true;
+
+  var heading = null;
+
+  if (typeof evt.webkitCompassHeading === 'number' &&
+      !isNaN(evt.webkitCompassHeading)) {
+    /* iOS Safari: clockwise from North, já em [0, 360) */
+    heading = evt.webkitCompassHeading;
+
+  } else if (typeof evt.alpha === 'number' && !isNaN(evt.alpha)) {
+    /* Android: alpha cresce anti-horário → inverte para clockwise */
+    heading = (360 - evt.alpha + 360) % 360;
   }
-  runCalculations();
+
+  if (heading !== null) {
+    app.compassHeading = heading;
+    runCalculations();
+  }
 }
+
+/* Alias mantido para compatibilidade */
+function onDeviceOrientation(evt) { handleOrientationEvent(evt); }
 
 /* ─────────────────────────────────────────────────
    GPS — watcher contínuo
@@ -744,7 +773,11 @@ document.getElementById('start-btn').addEventListener('click', async function ()
   injectARScene();
 
   /* 5 ── Ativa bússola */
-  window.addEventListener('deviceorientation', onDeviceOrientation, true);
+  /* Registra AMBOS os eventos:
+     deviceorientationabsolute → Android (alpha relativo ao Norte geográfico)
+     deviceorientation         → iOS (webkitCompassHeading)                   */
+  window.addEventListener('deviceorientationabsolute', handleOrientationEvent, true);
+  window.addEventListener('deviceorientation',         handleOrientationEvent, true);
 
   /* 6 ── Mostra HUD, esconde tela inicial */
   document.getElementById('start-screen').style.display = 'none';
