@@ -426,7 +426,8 @@
   loading-screen="enabled: false"
 >
   <!-- Câmera geolocalizada -->
-  <a-camera id="ar-camera" gps-camera rotation-reader></a-camera>
+  <!-- gps-camera é adicionado dinamicamente após o usuário conceder a permissão -->
+  <a-camera id="ar-camera"></a-camera>
 
   <!-- ▸ Monumento: cilindro translúcido laranja 10m de altura -->
   <a-entity
@@ -755,9 +756,51 @@
   /* ─────────────────────────────────────────────
      Botão INICIAR
      ───────────────────────────────────────────── */
-  document.getElementById('start-btn').addEventListener('click', async function () {
+  /* ─────────────────────────────────────────────
+     Exibe erro de GPS na tela inicial com instruções
+     ───────────────────────────────────────────── */
+  function showGpsError(err) {
+    var btn  = document.getElementById('start-btn');
+    var hint = document.querySelector('.ss-hint');
 
-    /* iOS 13+: solicitar permissão explícita para DeviceOrientation */
+    var msgs = {
+      1: '🔒 Acesso ao GPS negado.\nToque no ícone 🔒 na barra do navegador → "Permissões" → ative Localização. Depois recarregue a página.',
+      2: '📡 Posição indisponível. Verifique se o GPS do dispositivo está ativado nas configurações do celular.',
+      3: '⏱ Tempo esgotado ao obter GPS. Certifique-se de estar ao ar livre e tente novamente.'
+    };
+    var code = err && err.code ? err.code : 0;
+    var msg  = msgs[code] || '❌ Não foi possível acessar o GPS. Verifique as permissões do navegador.';
+
+    if (hint) {
+      hint.style.color        = '#ff6b6b';
+      hint.style.fontWeight   = '600';
+      hint.style.lineHeight   = '1.6';
+      hint.textContent        = msg;
+    }
+    if (btn) {
+      btn.textContent = '↺  Tentar novamente';
+      btn.style.background = 'linear-gradient(130deg, #555, #777)';
+      btn.style.boxShadow  = 'none';
+    }
+    console.warn('[GPS] Erro', code, err && err.message);
+  }
+
+  /* ─────────────────────────────────────────────
+     Botão INICIAR
+     Fluxo: DeviceOrientation → GPS → AR.js → HUD
+     ───────────────────────────────────────────── */
+  document.getElementById('start-btn').addEventListener('click', async function () {
+    var btn = document.getElementById('start-btn');
+
+    /* Restaura visual do botão caso seja uma segunda tentativa */
+    btn.textContent      = '⏳ Aguardando permissões…';
+    btn.disabled         = true;
+    btn.style.background = '';
+    btn.style.boxShadow  = '';
+    var hint = document.querySelector('.ss-hint');
+    if (hint) { hint.style.color = ''; hint.style.fontWeight = ''; hint.textContent = 'Permita o acesso à câmera, localização GPS e sensores de movimento.'; }
+
+    /* 1 ── iOS 13+: permissão de DeviceOrientation (giroscópio/bússola) */
     if (
       typeof DeviceOrientationEvent !== 'undefined' &&
       typeof DeviceOrientationEvent.requestPermission === 'function'
@@ -765,40 +808,55 @@
       try {
         var perm = await DeviceOrientationEvent.requestPermission();
         if (perm !== 'granted') {
-          alert(
-            'Permissão de orientação negada.\n' +
-            'A seta direcional pode não funcionar corretamente.'
-          );
+          alert('Permissão de orientação negada.\nA seta direcional pode não funcionar corretamente.');
         }
       } catch (e) {
         console.warn('[OrientPerm]', e);
       }
     }
 
-    /* Registra listener de bússola */
+    /* 2 ── Solicita GPS dentro do gesto do usuário (garante que o
+            browser exiba o diálogo de permissão)
+            Em debugMode o geolocation já está mockado — pula.        */
+    if (!debugMode) {
+      try {
+        await new Promise(function (resolve, reject) {
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true,
+            timeout: 15000,
+            maximumAge: 0
+          });
+        });
+      } catch (err) {
+        /* Permissão negada ou GPS indisponível — mostra erro e para */
+        showGpsError(err);
+        btn.disabled = false;
+        return;
+      }
+    }
+
+    /* 3 ── Registra listener de bússola */
     window.addEventListener('deviceorientation', onDeviceOrientation, true);
 
-    /* Troca tela inicial → HUD */
+    /* 4 ── Ativa o componente gps-camera do AR.js na câmera
+            (agora que a permissão foi concedida, o watchPosition
+            interno do AR.js vai disparar com o diálogo já aceito)  */
+    var cam = document.getElementById('ar-camera');
+    if (cam) cam.setAttribute('gps-camera', '');
+
+    /* 5 ── Troca tela inicial → HUD */
     document.getElementById('start-screen').style.display = 'none';
     document.getElementById('hud').style.display = 'block';
 
-    /* Inicia GPS */
+    /* 6 ── Inicia nosso próprio watcher (cálculos de HUD) */
     setStatus('Aguardando GPS…', 'warn');
     startGPS();
 
-    /* Ajustes exclusivos do modo debug */
+    /* 7 ── Ajustes do modo debug */
     if (debugMode) {
       document.getElementById('debug-hud-badge').style.display = 'block';
       setStatus('Simulação ativa — ' + DEBUG_SIM_DISTANCE + 'm do monumento', 'warn');
-
-      /* Sem bússola real: simula heading = 0° (Norte) para que a
-         seta aponte para o Sul, ou seja, em direção ao monumento
-         (que está ao Sul da posição simulada ao Norte)             */
-      if (!app.compassAvailable) {
-        app.compassHeading = 0;
-      }
-
-      /* Garante recálculo mesmo que Google Maps já esteja pronto */
+      if (!app.compassAvailable) app.compassHeading = 0;
       if (window._googleMapsReady) runCalculations();
       else window._pendingCalc = runCalculations;
     }
