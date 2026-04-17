@@ -6,95 +6,315 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>HyperAR Clone - Protótipo Real</title>
-    
+    <title>HyperAR - Navegação AR</title>
+
     <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
     <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
-
     <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDchAKfjN2mWlGsvrYZVoyt9xtKFPNtlTo&libraries=geometry"></script>
 
     <style>
-        body { margin: 0; overflow: hidden; font-family: sans-serif; }
+        * { box-sizing: border-box; }
+        body { margin: 0; overflow: hidden; font-family: sans-serif; background: #000; }
+
+        /* ---- Seta AR sobreposta à câmera ---- */
+        #nav-overlay {
+            position: absolute;
+            top: 7%;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            pointer-events: none;
+        }
+
+        #arrow-circle {
+            width: 96px;
+            height: 96px;
+            background: rgba(0, 0, 0, 0.45);
+            border-radius: 50%;
+            border: 2px solid rgba(0, 229, 255, 0.55);
+            backdrop-filter: blur(6px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #direction-svg {
+            width: 64px;
+            height: 64px;
+            transition: transform 0.35s ease;
+            filter: drop-shadow(0 0 7px #00E5FF);
+        }
+
+        #nav-label {
+            margin-top: 7px;
+            color: #fff;
+            font-size: 13px;
+            font-weight: bold;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 4px 12px;
+            border-radius: 12px;
+            backdrop-filter: blur(6px);
+            letter-spacing: 0.3px;
+        }
+
+        /* ---- Mapa inferior ---- */
         #ui-layer {
-            position: absolute; bottom: 0; left: 0; width: 100%; height: 40vh;
-            display: flex; justify-content: center; align-items: flex-end; z-index: 1000;
+            position: absolute; bottom: 0; left: 0;
+            width: 100%; height: 40vh;
+            display: flex; justify-content: center; align-items: flex-end;
+            z-index: 1000;
         }
         .map-card {
             width: 92%; height: 90%; margin-bottom: 15px;
-            background: rgba(15, 15, 15, 0.8); backdrop-filter: blur(12px);
-            border-radius: 28px; border: 1px solid rgba(255,255,255,0.1);
+            background: rgba(15, 15, 15, 0.8);
+            backdrop-filter: blur(12px);
+            border-radius: 28px;
+            border: 1px solid rgba(255,255,255,0.1);
             display: flex; flex-direction: column; overflow: hidden;
         }
         #map-canvas { flex-grow: 1; width: 100%; }
-        .info-bar { color: white; padding: 12px; text-align: center; font-size: 14px; font-weight: bold; }
+        .info-bar {
+            color: white; padding: 10px 14px;
+            text-align: center; font-size: 13px; font-weight: bold;
+        }
     </style>
 </head>
 
 <body>
+
+    <!-- Seta de direção AR (overlay sobre a câmera) -->
+    <div id="nav-overlay">
+        <div id="arrow-circle">
+            <svg id="direction-svg" viewBox="0 0 60 60">
+                <!-- Haste da seta -->
+                <rect x="26" y="24" width="8" height="32" rx="3" fill="#00E5FF"/>
+                <!-- Ponta da seta (triângulo apontando para cima = frente) -->
+                <polygon points="30,3 44,28 16,28" fill="#00E5FF"/>
+            </svg>
+        </div>
+        <div id="nav-label">Aguardando GPS...</div>
+    </div>
+
+    <!-- Mapa inferior -->
     <div id="ui-layer">
         <div class="map-card">
             <div id="map-canvas"></div>
-            <div class="info-bar" id="dist-info">Calculando distância...</div>
+            <div class="info-bar" id="dist-info">Calculando rota...</div>
         </div>
     </div>
 
+    <!-- Cena AR -->
     <a-scene vr-mode-ui="enabled: false" arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;">
-        <a-box id="monumento" color="#00E5FF" scale="4 4 4" 
-               gps-entity-place="latitude: -10.968111; longitude: -37.059889;"></a-box>
-        
+
+        <!-- Marcador 3D visível no mundo real quando o usuário aponta a câmera para o destino -->
+        <a-entity gps-entity-place="latitude: -10.968111; longitude: -37.059889;">
+            <a-cone color="#00E5FF" radius-bottom="0.6" radius-top="0" height="2.5"
+                    position="0 4 0" rotation="0 0 0"
+                    material="emissive: #00E5FF; emissiveIntensity: 0.4;">
+            </a-cone>
+            <a-box color="#FF6B35" scale="2 2 2" position="0 1 0"
+                   material="emissive: #FF6B35; emissiveIntensity: 0.3;">
+            </a-box>
+        </a-entity>
+
         <a-camera gps-camera rotation-reader></a-camera>
     </a-scene>
 
     <script>
+        const DEST = { lat: -10.968111, lng: -37.059889 };
+
         let map, directionsService, directionsRenderer, userMarker;
-        const destPos = { lat: -10.968111, lng: -37.059889 };
+        let currentPos    = null;
+        let compassHeading = 0;
+        let lastRoutePos  = null;
+        let routeTimer    = null;
 
-        function initNavigation() {
-            // Inicializa o Mapa
-            map = new google.maps.Map(document.getElementById("map-canvas"), {
-                zoom: 18,
-                center: destPos,
-                disableDefaultUI: true,
-                styles: [{ featureType: "all", elementType: "labels", stylers: [{ visibility: "on" }] }]
-            });
-
-            directionsService = new google.maps.DirectionsService();
-            directionsRenderer = new google.maps.DirectionsRenderer({
-                map: map,
-                suppressMarkers: false,
-                polylineOptions: { strokeColor: "#00E5FF", strokeWeight: 6 }
-            });
-
-            // Rastrear posição do usuário
-            if (navigator.geolocation) {
-                navigator.geolocation.watchPosition(position => {
-                    const userPos = {
-                        lat: position.coords.latitude,
-                        lng: position.coords.longitude
-                    };
-
-                    // Atualiza mapa e traça rota
-                    map.setCenter(userPos);
-                    calculateRoute(userPos, destPos);
-                }, null, { enableHighAccuracy: true });
+        // ============================================================
+        // BÚSSOLA (Device Orientation)
+        // ============================================================
+        function iniciarBussola() {
+            // iOS 13+ exige permissão explícita
+            if (typeof DeviceOrientationEvent !== 'undefined' &&
+                typeof DeviceOrientationEvent.requestPermission === 'function') {
+                DeviceOrientationEvent.requestPermission()
+                    .then(perm => { if (perm === 'granted') registrarBussola(); })
+                    .catch(console.error);
+            } else {
+                registrarBussola();
             }
         }
 
-        function calculateRoute(start, end) {
+        function registrarBussola() {
+            window.addEventListener('deviceorientationabsolute', onOrientacao, true);
+            window.addEventListener('deviceorientation',         onOrientacao, true);
+        }
+
+        function onOrientacao(e) {
+            if (e.webkitCompassHeading != null) {
+                // Safari / iOS — já é o heading em graus (0 = Norte)
+                compassHeading = e.webkitCompassHeading;
+            } else if (e.absolute && e.alpha != null) {
+                // Android absoluto — alpha é rotação em relação ao Norte magnético
+                compassHeading = (360 - e.alpha + 360) % 360;
+            }
+            atualizarSeta();
+        }
+
+        // ============================================================
+        // CÁLCULOS GPS
+        // ============================================================
+        function calcBearing(de, para) {
+            const D2R = Math.PI / 180;
+            const dLon = (para.lng - de.lng) * D2R;
+            const lat1 = de.lat  * D2R;
+            const lat2 = para.lat * D2R;
+            const y = Math.sin(dLon) * Math.cos(lat2);
+            const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+            return (Math.atan2(y, x) * (180 / Math.PI) + 360) % 360;
+        }
+
+        function calcDistancia(de, para) {
+            const R   = 6371000;
+            const D2R = Math.PI / 180;
+            const dLat = (para.lat - de.lat) * D2R;
+            const dLon = (para.lng - de.lng) * D2R;
+            const a = Math.sin(dLat/2)**2
+                    + Math.cos(de.lat*D2R) * Math.cos(para.lat*D2R) * Math.sin(dLon/2)**2;
+            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        }
+
+        // ============================================================
+        // ATUALIZA SETA DE DIREÇÃO
+        // ============================================================
+        function atualizarSeta() {
+            if (!currentPos) return;
+
+            const bearing    = calcBearing(currentPos, DEST);
+            const angRelativo = (bearing - compassHeading + 360) % 360;
+
+            // Rotaciona o SVG: 0° = frente, 90° = direita, 270° = esquerda
+            document.getElementById('direction-svg').style.transform =
+                `rotate(${angRelativo}deg)`;
+
+            // Texto de instrução
+            const dist = calcDistancia(currentPos, DEST);
+            let label;
+            if (dist < 15) {
+                label = 'Chegou ao destino!';
+            } else if (angRelativo <= 20 || angRelativo >= 340) {
+                label = 'Siga em frente';
+            } else if (angRelativo < 70) {
+                label = 'Vire levemente a direita';
+            } else if (angRelativo <= 110) {
+                label = 'Vire a direita';
+            } else if (angRelativo < 160) {
+                label = 'Vire bastante a direita';
+            } else if (angRelativo <= 200) {
+                label = 'Retorne';
+            } else if (angRelativo < 250) {
+                label = 'Vire bastante a esquerda';
+            } else if (angRelativo <= 290) {
+                label = 'Vire a esquerda';
+            } else {
+                label = 'Vire levemente a esquerda';
+            }
+
+            document.getElementById('nav-label').textContent = label;
+        }
+
+        // ============================================================
+        // GPS — watchPosition
+        // ============================================================
+        function onPosicaoAtualizada(position) {
+            currentPos = {
+                lat: position.coords.latitude,
+                lng: position.coords.longitude
+            };
+
+            // Marcador azul do usuário no mapa
+            if (!userMarker) {
+                userMarker = new google.maps.Marker({
+                    position: currentPos,
+                    map,
+                    icon: {
+                        path: google.maps.SymbolPath.CIRCLE,
+                        scale: 9,
+                        fillColor: '#00E5FF',
+                        fillOpacity: 1,
+                        strokeColor: '#ffffff',
+                        strokeWeight: 2
+                    },
+                    title: 'Você'
+                });
+            } else {
+                userMarker.setPosition(currentPos);
+            }
+
+            map.setCenter(currentPos);
+            atualizarSeta();
+
+            // Recalcula rota somente se moveu mais de 10 metros
+            // (evita flood na API do Google Directions)
+            const moveu = !lastRoutePos || calcDistancia(currentPos, lastRoutePos) > 10;
+            if (moveu) {
+                clearTimeout(routeTimer);
+                routeTimer = setTimeout(() => {
+                    lastRoutePos = { ...currentPos };
+                    calcularRota(currentPos, DEST);
+                }, 1200);
+            }
+        }
+
+        // ============================================================
+        // MAPA E ROTA
+        // ============================================================
+        function initNavigation() {
+            map = new google.maps.Map(document.getElementById('map-canvas'), {
+                zoom: 18,
+                center: DEST,
+                disableDefaultUI: true,
+                styles: [{ featureType: 'all', elementType: 'labels',
+                           stylers: [{ visibility: 'on' }] }]
+            });
+
+            directionsService  = new google.maps.DirectionsService();
+            directionsRenderer = new google.maps.DirectionsRenderer({
+                map,
+                suppressMarkers: false,
+                polylineOptions: { strokeColor: '#00E5FF', strokeWeight: 5 }
+            });
+
+            if (navigator.geolocation) {
+                navigator.geolocation.watchPosition(
+                    onPosicaoAtualizada,
+                    err => console.warn('GPS erro:', err),
+                    { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+                );
+            }
+
+            iniciarBussola();
+        }
+
+        function calcularRota(inicio, fim) {
             directionsService.route({
-                origin: start,
-                destination: end,
+                origin: inicio,
+                destination: fim,
                 travelMode: google.maps.TravelMode.WALKING
             }, (response, status) => {
-                if (status === "OK") {
+                if (status === 'OK') {
                     directionsRenderer.setDirections(response);
-                    const distance = response.routes[0].legs[0].distance.text;
-                    document.getElementById('dist-info').innerText = `Distância até o Monumento: ${distance}`;
+                    const leg = response.routes[0].legs[0];
+                    document.getElementById('dist-info').innerText =
+                        `${leg.distance.text}  ·  ~${leg.duration.text} a pe`;
                 }
             });
         }
 
         window.onload = initNavigation;
     </script>
+
 </body>
 </html>
