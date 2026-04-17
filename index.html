@@ -3,96 +3,95 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Protótipo WebAR - Estilo Hyper</title>
+    <title>HyperAR Clone - Protótipo Real</title>
     
     <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
-    <script type="text/javascript" src="https://raw.githack.com/AR-js-org/AR.js/master/three.js/build/ar-threex-location-only.js"></script>
-    <script type="text/javascript" src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
+    <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
+
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDchAKfjN2mWlGsvrYZVoyt9xtKFPNtlTo&libraries=geometry"></script>
 
     <style>
-        body {
-            margin: 0;
-            overflow: hidden;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-        }
-
-        /* Camada de UI sobreposta à câmera */
+        body { margin: 0; overflow: hidden; font-family: sans-serif; }
         #ui-layer {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            width: 100%;
-            height: 35vh; /* Ocupa os 35% inferiores da tela */
-            display: flex;
-            justify-content: center;
-            align-items: flex-end;
-            z-index: 999; /* Garante que fique por cima do canvas 3D */
-            pointer-events: none; /* Deixa o toque passar para o mapa se necessário */
+            position: absolute; bottom: 0; left: 0; width: 100%; height: 40vh;
+            display: flex; justify-content: center; align-items: flex-end; z-index: 1000;
         }
-
-        /* O "Card" do Mapa estilo HyperAR */
         .map-card {
-            width: 90%;
-            height: 85%;
-            margin-bottom: 20px;
-            background: rgba(20, 20, 20, 0.85); /* Fundo escuro translúcido */
-            backdrop-filter: blur(10px); /* Efeito Glassmorphism */
-            border-radius: 24px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-            padding: 10px;
-            pointer-events: auto; /* Reativa o toque para arrastar o mapa */
-            display: flex;
-            flex-direction: column;
-            border: 1px solid rgba(255,255,255,0.1);
+            width: 92%; height: 90%; margin-bottom: 15px;
+            background: rgba(15, 15, 15, 0.8); backdrop-filter: blur(12px);
+            border-radius: 28px; border: 1px solid rgba(255,255,255,0.1);
+            display: flex; flex-direction: column; overflow: hidden;
         }
-
-        .card-header {
-            color: white;
-            font-weight: 600;
-            font-size: 14px;
-            margin-bottom: 10px;
-            text-align: center;
-        }
-
-        /* Container do iframe do mapa */
-        .map-container {
-            width: 100%;
-            flex-grow: 1;
-            border-radius: 16px;
-            overflow: hidden;
-        }
-
-        iframe {
-            width: 100%;
-            height: 100%;
-            border: 0;
-        }
+        #map-canvas { flex-grow: 1; width: 100%; }
+        .info-bar { color: white; padding: 12px; text-align: center; font-size: 14px; font-weight: bold; }
     </style>
 </head>
 
 <body>
     <div id="ui-layer">
         <div class="map-card">
-            <div class="card-header">Destino: Ponto Histórico</div>
-            <div class="map-container">
-                <iframe src="https://maps.google.com/maps?q=-10.968111,-37.059889&z=17&output=embed" allowfullscreen="" loading="lazy"></iframe>
-            </div>
+            <div id="map-canvas"></div>
+            <div class="info-bar" id="dist-info">Calculando distância...</div>
         </div>
     </div>
 
-    <a-scene
-        vr-mode-ui="enabled: false"
-        arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;">
+    <a-scene vr-mode-ui="enabled: false" arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;">
+        <a-box id="monumento" color="#00E5FF" scale="4 4 4" 
+               gps-entity-place="latitude: -10.968111; longitude: -37.059889;"></a-box>
         
-        <a-box 
-            color="#00E5FF" 
-            scale="5 5 5" 
-            position="0 2 0"
-            gps-entity-place="latitude: -10.968111; longitude: -37.059889;"
-            animation="property: rotation; to: 0 360 0; loop: true; dur: 4000; easing: linear">
-        </a-box>
-
         <a-camera gps-camera rotation-reader></a-camera>
     </a-scene>
+
+    <script>
+        let map, directionsService, directionsRenderer, userMarker;
+        const destPos = { lat: -10.968111, lng: -37.059889 };
+
+        function initNavigation() {
+            // Inicializa o Mapa
+            map = new google.maps.Map(document.getElementById("map-canvas"), {
+                zoom: 18,
+                center: destPos,
+                disableDefaultUI: true,
+                styles: [{ featureType: "all", elementType: "labels", stylers: [{ visibility: "on" }] }]
+            });
+
+            directionsService = new google.maps.DirectionsService();
+            directionsRenderer = new google.maps.DirectionsRenderer({
+                map: map,
+                suppressMarkers: false,
+                polylineOptions: { strokeColor: "#00E5FF", strokeWeight: 6 }
+            });
+
+            // Rastrear posição do usuário
+            if (navigator.geolocation) {
+                navigator.geolocation.watchPosition(position => {
+                    const userPos = {
+                        lat: position.coords.latitude,
+                        lng: position.coords.longitude
+                    };
+
+                    // Atualiza mapa e traça rota
+                    map.setCenter(userPos);
+                    calculateRoute(userPos, destPos);
+                }, null, { enableHighAccuracy: true });
+            }
+        }
+
+        function calculateRoute(start, end) {
+            directionsService.route({
+                origin: start,
+                destination: end,
+                travelMode: google.maps.TravelMode.WALKING
+            }, (response, status) => {
+                if (status === "OK") {
+                    directionsRenderer.setDirections(response);
+                    const distance = response.routes[0].legs[0].distance.text;
+                    document.getElementById('dist-info').innerText = `Distância até o Monumento: ${distance}`;
+                }
+            });
+        }
+
+        window.onload = initNavigation;
+    </script>
 </body>
 </html>
