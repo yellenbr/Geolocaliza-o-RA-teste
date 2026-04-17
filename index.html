@@ -1,907 +1,98 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-  <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <title>AR · Praça Fausto Cardoso</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Protótipo WebAR - Estilo Hyper</title>
+    
+    <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
+    <script type="text/javascript" src="https://raw.githack.com/AR-js-org/AR.js/master/three.js/build/ar-threex-location-only.js"></script>
+    <script type="text/javascript" src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
 
-  <!-- ════════════════════════════════════════════════════════════
-       ▼▼  CONFIGURAÇÕES PRINCIPAIS — edite estas variáveis  ▼▼
-       ════════════════════════════════════════════════════════════ -->
-  <script>
-    /* Chave da Google Maps JavaScript API
-       Obtenha em: https://console.cloud.google.com/
-       Habilite: Maps JS API + Geometry Library          */
-    var GOOGLE_MAPS_API_KEY = 'AIzaSyAhFPY23nrQ2hSlCnzZq-jrHNPky903EcM';
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
 
-    /* ── Modo de Simulação ─────────────────────────────────────
-       true  → ignora o GPS real e simula a posição do usuário
-               a ~18 m do monumento. Permite testar a seta AR,
-               o painel informativo e o objeto 3D de qualquer lugar.
-       false → usa o GPS real do dispositivo.               */
-    var debugMode = false;
+        /* Camada de UI sobreposta à câmera */
+        #ui-layer {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 35vh; /* Ocupa os 35% inferiores da tela */
+            display: flex;
+            justify-content: center;
+            align-items: flex-end;
+            z-index: 999; /* Garante que fique por cima do canvas 3D */
+            pointer-events: none; /* Deixa o toque passar para o mapa se necessário */
+        }
 
-    /* Coordenadas do monumento (Praça Fausto Cardoso, Aracaju) */
-    var MONUMENT_LAT = -10.9172482;
-    var MONUMENT_LNG = -37.0471308;
+        /* O "Card" do Mapa estilo HyperAR */
+        .map-card {
+            width: 90%;
+            height: 85%;
+            margin-bottom: 20px;
+            background: rgba(20, 20, 20, 0.85); /* Fundo escuro translúcido */
+            backdrop-filter: blur(10px); /* Efeito Glassmorphism */
+            border-radius: 24px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            padding: 10px;
+            pointer-events: auto; /* Reativa o toque para arrastar o mapa */
+            display: flex;
+            flex-direction: column;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
 
-    /* Distância (metros) para exibir o painel histórico        */
-    var PROXIMITY_THRESHOLD = 20;
+        .card-header {
+            color: white;
+            font-weight: 600;
+            font-size: 14px;
+            margin-bottom: 10px;
+            text-align: center;
+        }
 
-    /* Distância simulada no debug (deve ser < PROXIMITY_THRESHOLD
-       para o painel aparecer automaticamente)                  */
-    var DEBUG_SIM_DISTANCE = 18;
-  </script>
-  <!-- ════════════════════════════════════════════════════════════
-       ▲▲  fim das configurações                            ▲▲
-       ════════════════════════════════════════════════════════════ -->
+        /* Container do iframe do mapa */
+        .map-container {
+            width: 100%;
+            flex-grow: 1;
+            border-radius: 16px;
+            overflow: hidden;
+        }
 
-  <!-- ── Mock do GPS (modo simulação) ────────────────────────────
-       CRÍTICO: deve rodar ANTES dos scripts do A-Frame/AR.js
-       para que o AR.js já receba a posição falsa ao inicializar. -->
-  <script>
-    (function () {
-      if (!debugMode) return;
-
-      /* Calcula ponto ~DEBUG_SIM_DISTANCE metros ao Norte do monumento */
-      var dLat = (DEBUG_SIM_DISTANCE / 6371000) * (180 / Math.PI);
-      var simLat = MONUMENT_LAT + dLat;
-      var simLng = MONUMENT_LNG;
-
-      var fakePosition = {
-        coords: { latitude: simLat, longitude: simLng, accuracy: 3 },
-        timestamp: Date.now()
-      };
-
-      /* Substitui navigator.geolocation por implementação fake */
-      navigator.geolocation = {
-        watchPosition: function (onSuccess) {
-          onSuccess(fakePosition);
-          /* Reenvia periodicamente — mantém AR.js atualizado */
-          var id = setInterval(function () { onSuccess(fakePosition); }, 3000);
-          return id;
-        },
-        getCurrentPosition: function (onSuccess) {
-          onSuccess(fakePosition);
-        },
-        clearWatch: function (id) { clearInterval(id); }
-      };
-
-      console.info(
-        '[AR Debug] GPS mockado: lat=' + simLat.toFixed(7) +
-        ' lng=' + simLng.toFixed(7) +
-        ' (' + DEBUG_SIM_DISTANCE + 'm do monumento)'
-      );
-    })();
-  </script>
-
-  <style>
-    *, *::before, *::after {
-      margin: 0; padding: 0;
-      box-sizing: border-box;
-      -webkit-tap-highlight-color: transparent;
-      -webkit-user-select: none; user-select: none;
-    }
-
-    :root {
-      --accent:       #FF6600;
-      --accent-soft:  rgba(255, 102, 0, 0.55);
-      --accent-dim:   rgba(255, 102, 0, 0.12);
-      --glass:        rgba(8, 8, 20, 0.62);
-      --glass-border: rgba(255, 255, 255, 0.11);
-    }
-
-    html, body {
-      width: 100%; height: 100%;
-      overflow: hidden;
-      background: #000;
-      font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
-      color: #fff;
-    }
-
-    /* ── A-Frame scene ─────────────────────────────────────── */
-    a-scene {
-      position: fixed !important;
-      top: 0 !important; left: 0 !important;
-      width: 100% !important;
-      height: 100% !important;
-      z-index: 0 !important;
-    }
-
-    /* ═══════════════════════════════════════════════════════
-       TELA INICIAL
-       ═══════════════════════════════════════════════════════ */
-    #start-screen {
-      position: fixed; inset: 0; z-index: 9000;
-      background: radial-gradient(ellipse at 55% 35%, #1b0f40 0%, #0c0c1c 70%);
-      display: flex; flex-direction: column;
-      align-items: center; justify-content: center;
-      gap: 20px; padding: 36px 28px;
-      text-align: center;
-    }
-
-    .ss-pin { font-size: 3.8rem; line-height: 1; }
-
-    .ss-title {
-      font-size: clamp(1.3rem, 5.5vw, 1.8rem);
-      font-weight: 800;
-      background: linear-gradient(130deg, var(--accent) 20%, #ffb347 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-    }
-
-    .ss-body {
-      font-size: 0.9rem;
-      color: rgba(255,255,255,0.62);
-      max-width: 310px;
-      line-height: 1.65;
-    }
-
-    #debug-start-badge {
-      display: none;
-      background: rgba(255, 208, 0, 0.1);
-      border: 1px solid rgba(255, 208, 0, 0.4);
-      color: #ffd000;
-      border-radius: 999px;
-      padding: 7px 20px;
-      font-size: 0.78rem;
-      font-weight: 700;
-      letter-spacing: 0.07em;
-    }
-
-    .ss-hint {
-      font-size: 0.74rem;
-      color: rgba(255,255,255,0.3);
-      max-width: 280px;
-      line-height: 1.55;
-    }
-
-    #start-btn {
-      margin-top: 4px;
-      background: linear-gradient(130deg, var(--accent), #ff9020);
-      color: #fff;
-      border: none;
-      border-radius: 999px;
-      padding: 17px 48px;
-      font-size: 1.08rem;
-      font-weight: 800;
-      letter-spacing: 0.04em;
-      cursor: pointer;
-      box-shadow: 0 6px 28px var(--accent-soft);
-      -webkit-appearance: none;
-      transition: transform 0.12s ease, box-shadow 0.12s ease;
-    }
-    #start-btn:active {
-      transform: scale(0.95);
-      box-shadow: 0 3px 12px var(--accent-soft);
-    }
-
-    /* ═══════════════════════════════════════════════════════
-       HUD PRINCIPAL
-       ═══════════════════════════════════════════════════════ */
-    #hud {
-      display: none;
-      position: fixed; inset: 0; z-index: 100;
-      pointer-events: none;
-    }
-
-    /* ── Barra de status (topo) ─────────────────────────── */
-    #status-bar {
-      position: absolute;
-      top: max(env(safe-area-inset-top), 14px);
-      left: 50%; transform: translateX(-50%);
-      background: var(--glass);
-      backdrop-filter: blur(16px) saturate(160%);
-      -webkit-backdrop-filter: blur(16px) saturate(160%);
-      border: 1px solid var(--glass-border);
-      border-radius: 999px;
-      padding: 9px 20px;
-      font-size: 0.78rem;
-      font-weight: 600;
-      white-space: nowrap;
-      display: flex; align-items: center; gap: 9px;
-      max-width: calc(100vw - 32px);
-    }
-
-    #status-dot {
-      width: 8px; height: 8px;
-      border-radius: 50%;
-      background: #444;
-      flex-shrink: 0;
-      transition: background 0.4s, box-shadow 0.4s;
-    }
-    #status-dot.active { background: #4caf50; box-shadow: 0 0 8px rgba(76,175,80,0.7); }
-    #status-dot.warn   { background: #ffc800; box-shadow: 0 0 8px rgba(255,200,0,0.7); }
-    #status-dot.error  { background: #f44336; box-shadow: 0 0 8px rgba(244,67,54,0.7); }
-
-    /* ── Badge debug no HUD ─────────────────────────────── */
-    #debug-hud-badge {
-      display: none;
-      position: absolute;
-      top: max(env(safe-area-inset-top), 14px);
-      right: 14px;
-      background: rgba(255, 208, 0, 0.14);
-      border: 1px solid rgba(255, 208, 0, 0.38);
-      color: #ffd000;
-      border-radius: 10px;
-      padding: 5px 12px;
-      font-size: 0.7rem;
-      font-weight: 700;
-      letter-spacing: 0.05em;
-    }
-
-    /* ── Seta direcional (centro de tela) ───────────────── */
-    #arrow-hub {
-      position: absolute;
-      top: 50%; left: 50%;
-      transform: translate(-50%, -50%);
-      display: flex; flex-direction: column;
-      align-items: center; gap: 11px;
-    }
-
-    #arrow-ring {
-      width: 78px; height: 78px;
-      border-radius: 50%;
-      background: var(--glass);
-      backdrop-filter: blur(14px);
-      -webkit-backdrop-filter: blur(14px);
-      border: 2px solid var(--glass-border);
-      box-shadow:
-        0 0 22px var(--accent-soft),
-        inset 0 1px 0 rgba(255,255,255,0.07);
-      display: flex; align-items: center; justify-content: center;
-      /* A rotação é controlada pelo JS — will-change para suavidade */
-      will-change: transform;
-      transition: transform 0.22s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-    }
-
-    #arrow-svg {
-      width: 36px; height: 36px;
-      fill: var(--accent);
-      filter: drop-shadow(0 0 9px var(--accent-soft));
-    }
-
-    #arrow-label {
-      font-size: 0.68rem;
-      font-weight: 700;
-      letter-spacing: 0.09em;
-      text-transform: uppercase;
-      color: rgba(255,255,255,0.72);
-      background: var(--glass);
-      backdrop-filter: blur(14px);
-      -webkit-backdrop-filter: blur(14px);
-      border: 1px solid var(--glass-border);
-      border-radius: 999px;
-      padding: 4px 14px;
-    }
-
-    /* ── Medidor de distância (rodapé do HUD) ───────────── */
-    #dist-meter {
-      position: absolute;
-      bottom: calc(max(env(safe-area-inset-bottom), 0px) + 110px);
-      left: 50%; transform: translateX(-50%);
-      display: flex; flex-direction: column;
-      align-items: center; gap: 4px;
-    }
-
-    #dist-number {
-      font-size: 2.7rem;
-      font-weight: 800;
-      color: var(--accent);
-      text-shadow: 0 0 20px var(--accent-soft);
-      line-height: 1;
-      transition: color 0.5s, text-shadow 0.5s;
-    }
-    #dist-number.near {
-      color: #4caf50;
-      text-shadow: 0 0 18px rgba(76,175,80,0.65);
-    }
-    #dist-unit {
-      font-size: 0.7rem;
-      font-weight: 600;
-      color: rgba(255,255,255,0.48);
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-    }
-
-    /* ═══════════════════════════════════════════════════════
-       PAINEL INFORMATIVO
-       ═══════════════════════════════════════════════════════ */
-    #info-panel {
-      position: fixed;
-      bottom: 0; left: 0; right: 0; z-index: 500;
-      background: linear-gradient(
-        to top,
-        rgba(6, 6, 16, 0.97) 0%,
-        rgba(10, 8, 22, 0.94) 100%
-      );
-      backdrop-filter: blur(22px) saturate(180%);
-      -webkit-backdrop-filter: blur(22px) saturate(180%);
-      border-top: 1px solid rgba(255, 102, 0, 0.32);
-      border-radius: 24px 24px 0 0;
-      padding: 18px 22px calc(max(env(safe-area-inset-bottom), 0px) + 26px);
-      transform: translateY(110%);
-      transition: transform 0.46s cubic-bezier(0.34, 1.56, 0.64, 1);
-      max-height: 72vh;
-      overflow-y: auto;
-      pointer-events: all;
-    }
-    #info-panel.open { transform: translateY(0); }
-
-    /* Scrollbar discreta */
-    #info-panel::-webkit-scrollbar { width: 4px; }
-    #info-panel::-webkit-scrollbar-track { background: transparent; }
-    #info-panel::-webkit-scrollbar-thumb { background: rgba(255,102,0,0.35); border-radius: 2px; }
-
-    .ip-handle {
-      width: 40px; height: 4px;
-      background: rgba(255,255,255,0.2);
-      border-radius: 2px;
-      margin: 0 auto 20px;
-    }
-
-    .ip-header {
-      display: flex; align-items: flex-start; gap: 14px;
-      margin-bottom: 14px;
-    }
-    .ip-icon  { font-size: 2.1rem; line-height: 1.1; flex-shrink: 0; }
-    .ip-title {
-      font-size: 1.08rem; font-weight: 800;
-      color: var(--accent); margin-bottom: 3px;
-    }
-    .ip-meta {
-      font-size: 0.71rem;
-      color: rgba(255,255,255,0.38);
-      letter-spacing: 0.04em;
-    }
-
-    .ip-text {
-      font-size: 0.85rem;
-      color: rgba(255,255,255,0.82);
-      line-height: 1.78;
-      margin-bottom: 12px;
-    }
-    .ip-text strong { color: rgba(255,255,255,0.96); }
-
-    .ip-fact {
-      background: var(--accent-dim);
-      border-left: 3px solid var(--accent);
-      border-radius: 0 10px 10px 0;
-      padding: 11px 14px;
-      font-size: 0.81rem;
-      color: rgba(255,255,255,0.78);
-      line-height: 1.65;
-      margin-bottom: 20px;
-    }
-
-    #close-panel-btn {
-      width: 100%;
-      background: rgba(255,255,255,0.07);
-      border: 1px solid rgba(255,255,255,0.14);
-      color: rgba(255,255,255,0.78);
-      border-radius: 14px;
-      padding: 14px;
-      font-size: 0.92rem; font-weight: 600;
-      cursor: pointer;
-      -webkit-appearance: none;
-      transition: background 0.15s;
-    }
-    #close-panel-btn:active { background: rgba(255,255,255,0.14); }
-  </style>
+        iframe {
+            width: 100%;
+            height: 100%;
+            border: 0;
+        }
+    </style>
 </head>
+
 <body>
-
-<!-- ════════════════════════════════════════════
-     TELA INICIAL
-     ════════════════════════════════════════════ -->
-<div id="start-screen">
-  <div class="ss-pin">📍</div>
-  <h1 class="ss-title">AR · Praça Fausto Cardoso</h1>
-  <p class="ss-body">
-    Explore a história de <strong>Aracaju</strong> com marcadores de
-    Realidade Aumentada geolocalizados em tempo real.
-  </p>
-  <div id="debug-start-badge">🛠&nbsp; MODO SIMULAÇÃO ATIVO</div>
-  <p class="ss-hint">
-    Ao clicar em Iniciar, permita o acesso à <strong>câmera</strong>,
-    <strong>localização GPS</strong> e <strong>sensores de movimento</strong>.
-  </p>
-  <button id="start-btn">▶&nbsp; Iniciar Experiência</button>
-</div>
-
-
-<!-- ════════════════════════════════════════════
-     CENA A-FRAME / AR.js (location-based)
-     ════════════════════════════════════════════ -->
-<a-scene
-  id="ar-scene"
-  vr-mode-ui="enabled: false"
-  embedded
-  arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: true;"
-  renderer="antialias: true; alpha: true; logarithmicDepthBuffer: true;"
-  loading-screen="enabled: false"
->
-  <!-- Câmera geolocalizada -->
-  <!-- gps-camera é adicionado dinamicamente após o usuário conceder a permissão -->
-  <a-camera id="ar-camera"></a-camera>
-
-  <!-- ▸ Monumento: cilindro translúcido laranja 10m de altura -->
-  <a-entity
-    id="monument-entity"
-    gps-entity-place="latitude: -10.9172482; longitude: -37.0471308"
-    visible="false"
-  >
-    <!-- Corpo principal — cilindro girando lentamente -->
-    <a-cylinder
-      height="10"
-      radius="1.5"
-      color="#FF6600"
-      opacity="0.55"
-      transparent="true"
-      side="double"
-      position="0 5 0"
-      animation="property: rotation; to: 0 360 0; dur: 9000; easing: linear; loop: true"
-    ></a-cylinder>
-
-    <!-- Anel superior pulsante -->
-    <a-torus
-      radius="1.9"
-      radius-tubular="0.09"
-      color="#FF6600"
-      opacity="0.75"
-      transparent="true"
-      position="0 10.3 0"
-      animation__op="property: material.opacity; from: 0.15; to: 0.9; dur: 1300; easing: easeInOutSine; loop: true; dir: alternate"
-      animation__sc="property: scale; from: 0.82 0.82 0.82; to: 1.18 1.18 1.18; dur: 1300; easing: easeInOutSine; loop: true; dir: alternate"
-    ></a-torus>
-
-    <!-- Anel inferior estático -->
-    <a-torus
-      radius="1.9"
-      radius-tubular="0.09"
-      color="#ffaa33"
-      opacity="0.5"
-      transparent="true"
-      position="0 0.1 0"
-    ></a-torus>
-
-    <!-- Label flutuante (visível de perto) -->
-    <a-text
-      value="Praça Fausto Cardoso"
-      align="center"
-      color="#ffffff"
-      width="6"
-      position="0 11.8 0"
-      look-at="[gps-camera]"
-    ></a-text>
-  </a-entity>
-</a-scene>
-
-
-<!-- ════════════════════════════════════════════
-     HUD — sobreposto à câmera AR
-     ════════════════════════════════════════════ -->
-<div id="hud">
-
-  <!-- Barra de status superior -->
-  <div id="status-bar">
-    <div id="status-dot"></div>
-    <span id="status-text">Aguardando GPS…</span>
-  </div>
-
-  <!-- Badge de modo simulação -->
-  <div id="debug-hud-badge">🛠 SIMULAÇÃO</div>
-
-  <!-- Seta direcional — centro da tela -->
-  <div id="arrow-hub">
-    <div id="arrow-ring">
-      <!-- Seta apontando para CIMA = Norte (0°); JS gira conforme bearing -->
-      <svg id="arrow-svg" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-        <path d="M12 2 L19.5 21 L12 16.5 L4.5 21 Z"/>
-      </svg>
+    <div id="ui-layer">
+        <div class="map-card">
+            <div class="card-header">Destino: Ponto Histórico</div>
+            <div class="map-container">
+                <iframe src="https://maps.google.com/maps?q=-10.968111,-37.059889&z=17&output=embed" allowfullscreen="" loading="lazy"></iframe>
+            </div>
+        </div>
     </div>
-    <div id="arrow-label">Para o monumento</div>
-  </div>
 
-  <!-- Medidor de distância -->
-  <div id="dist-meter">
-    <div id="dist-number">--</div>
-    <div id="dist-unit">metros até o monumento</div>
-  </div>
+    <a-scene
+        vr-mode-ui="enabled: false"
+        arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;">
+        
+        <a-box 
+            color="#00E5FF" 
+            scale="5 5 5" 
+            position="0 2 0"
+            gps-entity-place="latitude: -10.968111; longitude: -37.059889;"
+            animation="property: rotation; to: 0 360 0; loop: true; dur: 4000; easing: linear">
+        </a-box>
 
-</div>
-
-
-<!-- ════════════════════════════════════════════
-     PAINEL HISTÓRICO (desliza quando < 20 m)
-     ════════════════════════════════════════════ -->
-<div id="info-panel">
-  <div class="ip-handle"></div>
-
-  <div class="ip-header">
-    <div class="ip-icon">🏛️</div>
-    <div>
-      <div class="ip-title">Praça Fausto Cardoso</div>
-      <div class="ip-meta">Aracaju, Sergipe &nbsp;·&nbsp; Centro Histórico &nbsp;·&nbsp; c. 1855</div>
-    </div>
-  </div>
-
-  <p class="ip-text">
-    A <strong>Praça Fausto Cardoso</strong> é um dos marcos históricos e cívicos mais
-    importantes de Aracaju. Nomeada em homenagem ao jurista e político sergipano
-    <strong>Fausto Cardoso</strong> (1864–1906), o local testemunhou episódios centrais
-    da história política de Sergipe no início do século XX.
-  </p>
-  <p class="ip-text">
-    Situada no coração do <strong>centro histórico</strong>, a praça abriga o Palácio Fausto
-    Cardoso e é palco permanente de manifestações culturais, artísticas e sociais. Seu conjunto
-    arquitetônico e seu coreto constituem um patrimônio urbano fundamental do estado.
-  </p>
-
-  <div class="ip-fact">
-    💡 <strong>Fato histórico:</strong> Em 13 de outubro de 1906, Fausto Cardoso liderou
-    uma revolta armada para tomar o poder do governador Guilherme Campos. Após invadir o
-    Palácio do Governo, foi assassinado por forças leais ao governador. O episódio —
-    conhecido como <em>Revolta de 1906</em> — repercutiu nacionalmente e resultou em
-    intervenção federal em Sergipe.
-  </div>
-
-  <button id="close-panel-btn" onclick="closeInfoPanel()">✕&nbsp; Fechar</button>
-</div>
-
-
-<!-- ════════════════════════════════════════════
-     SCRIPTS EXTERNOS
-     ════════════════════════════════════════════ -->
-<script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
-<script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar-location-only.js"></script>
-
-<!-- Google Maps + Geometry -->
-<script>
-  window._googleMapsReady = false;
-  window._pendingCalc     = null;
-
-  window.onGoogleMapsReady = function () {
-    window._googleMapsReady = true;
-    if (typeof window._pendingCalc === 'function') {
-      window._pendingCalc();
-      window._pendingCalc = null;
-    }
-  };
-</script>
-<script
-  async
-  defer
-  src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAhFPY23nrQ2hSlCnzZq-jrHNPky903EcM&libraries=geometry&callback=onGoogleMapsReady"
-  onerror="console.error('[AR] Google Maps não carregou. Verifique a chave da API.'); setStatus('Erro: Google Maps inválido','error');"
-></script>
-
-
-<!-- ════════════════════════════════════════════
-     LÓGICA PRINCIPAL
-     ════════════════════════════════════════════ -->
-<script>
-  /* ─────────────────────────────────────────────
-     Estado global da aplicação
-     ───────────────────────────────────────────── */
-  var app = {
-    userLat:           null,
-    userLng:           null,
-    compassHeading:    0,       // graus clockwise from North (bússola)
-    compassAvailable:  false,
-    arrowRotation:     0,       // rotação atual da seta (CSS degrees)
-    distance:          Infinity,
-    infoPanelOpen:     false,
-    panelShownOnce:    false,
-    gpsWatchId:        null
-  };
-
-  /* ─────────────────────────────────────────────
-     Utilitários de UI
-     ───────────────────────────────────────────── */
-  function setStatus(text, type) {
-    var dot  = document.getElementById('status-dot');
-    var span = document.getElementById('status-text');
-    if (span) span.textContent = text;
-    if (dot)  { dot.className = ''; if (type) dot.classList.add(type); }
-  }
-
-  function fmtDist(m) {
-    if (!isFinite(m) || isNaN(m)) return '--';
-    return m < 1000
-      ? Math.round(m) + 'm'
-      : (m / 1000).toFixed(1) + 'km';
-  }
-
-  /* ─────────────────────────────────────────────
-     Cálculos usando Google Maps Geometry
-     ───────────────────────────────────────────── */
-  function runCalculations() {
-    if (!window._googleMapsReady || app.userLat === null) return;
-
-    var userLL = new google.maps.LatLng(app.userLat, app.userLng);
-    var monLL  = new google.maps.LatLng(MONUMENT_LAT, MONUMENT_LNG);
-
-    /* Distância em metros */
-    var dist = google.maps.geometry.spherical.computeDistanceBetween(userLL, monLL);
-    app.distance = dist;
-
-    /* Bearing do Google Maps: ângulo de userLL → monLL
-       Retorna [-180, 180], onde 0 = Norte, 90 = Leste   */
-    var bearing = google.maps.geometry.spherical.computeHeading(userLL, monLL);
-
-    /* Rotação CSS da seta:
-       bearing            = direção absoluta do monumento (Norte = 0°)
-       app.compassHeading = para onde o topo do telefone aponta
-       diferença          = quanto girar a seta na tela               */
-    app.arrowRotation = ((bearing - app.compassHeading) % 360 + 360) % 360;
-
-    refreshHUD();
-  }
-
-  /* ─────────────────────────────────────────────
-     Atualiza elementos do HUD
-     ───────────────────────────────────────────── */
-  function refreshHUD() {
-    /* ── Seta ── */
-    var ring = document.getElementById('arrow-ring');
-    if (ring) ring.style.transform = 'rotate(' + app.arrowRotation + 'deg)';
-
-    /* ── Distância ── */
-    var numEl  = document.getElementById('dist-number');
-    var unitEl = document.getElementById('dist-unit');
-
-    if (numEl) {
-      numEl.textContent = fmtDist(app.distance);
-      numEl.classList.toggle('near', app.distance < PROXIMITY_THRESHOLD);
-    }
-    if (unitEl) {
-      unitEl.textContent = app.distance < 1000
-        ? 'metros até o monumento'
-        : 'km até o monumento';
-    }
-
-    /* ── Status / painel ── */
-    if (app.distance < PROXIMITY_THRESHOLD) {
-      setStatus('📍 Você chegou! (' + Math.round(app.distance) + 'm)', 'active');
-      if (!app.infoPanelOpen && !app.panelShownOnce) {
-        openInfoPanel();
-      }
-    } else {
-      setStatus(fmtDist(app.distance) + ' do monumento', 'active');
-    }
-
-    /* ── Monumento AR visível ── */
-    var mon = document.getElementById('monument-entity');
-    if (mon) mon.setAttribute('visible', 'true');
-  }
-
-  /* ─────────────────────────────────────────────
-     Geolocalização
-     ───────────────────────────────────────────── */
-  function startGPS() {
-    if (!navigator.geolocation) {
-      setStatus('GPS não suportado neste navegador', 'error');
-      return;
-    }
-
-    var opts = { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 };
-
-    app.gpsWatchId = navigator.geolocation.watchPosition(
-      function (pos) {
-        app.userLat = pos.coords.latitude;
-        app.userLng = pos.coords.longitude;
-
-        if (window._googleMapsReady) {
-          runCalculations();
-        } else {
-          /* Google Maps ainda carregando — agenda para quando estiver pronto */
-          window._pendingCalc = runCalculations;
-        }
-      },
-      function (err) {
-        console.warn('[GPS]', err.code, err.message);
-        var msgs = {
-          1: 'GPS: permissão negada',
-          2: 'GPS: posição indisponível',
-          3: 'GPS: tempo esgotado'
-        };
-        setStatus(msgs[err.code] || 'Erro de GPS', 'warn');
-      },
-      opts
-    );
-  }
-
-  /* ─────────────────────────────────────────────
-     Bússola — tratamento robusto iOS + Android
-
-     PROBLEMA RAIZ:
-       deviceorientation.alpha no Android NÃO é relativo
-       ao Norte magnético por padrão — é relativo a uma
-       referência arbitrária definida quando a página carregou.
-       Por isso a seta "aponta para lugares diferentes" mesmo
-       com computeHeading correto.
-
-     SOLUÇÃO:
-       1. deviceorientationabsolute  → Android Chrome (alpha
-          relativo ao Norte geográfico, evt.absolute = true)
-       2. webkitCompassHeading       → iOS Safari (sempre correto)
-       3. deviceorientation.alpha    → fallback apenas se nenhum
-          dos anteriores estiver disponível
-     ───────────────────────────────────────────── */
-  var _absOrientReady = false; /* true quando recebemos um evento absolute */
-
-  function handleOrientationEvent(evt) {
-    /* Preferência: se já temos fonte absoluta, ignorar eventos relativos */
-    if (_absOrientReady && evt.absolute !== true) return;
-    if (evt.absolute === true) _absOrientReady = true;
-
-    var heading = null;
-
-    if (typeof evt.webkitCompassHeading === 'number' &&
-        !isNaN(evt.webkitCompassHeading)) {
-      /* iOS Safari: já é heading clockwise from North [0, 360) */
-      heading = evt.webkitCompassHeading;
-
-    } else if (typeof evt.alpha === 'number' && !isNaN(evt.alpha)) {
-      /* Android (absolute ou fallback):
-         alpha cresce no sentido anti-horário a partir do Norte.
-         Inverte para obter heading clockwise from North.          */
-      heading = (360 - evt.alpha + 360) % 360;
-    }
-
-    if (heading !== null) {
-      app.compassAvailable = true;
-      app.compassHeading   = heading;
-      runCalculations();
-    }
-  }
-
-  /* Mantém compatibilidade com chamadas legadas (start button) */
-  function onDeviceOrientation(evt) { handleOrientationEvent(evt); }
-
-  /* ─────────────────────────────────────────────
-     Painel informativo
-     ───────────────────────────────────────────── */
-  function openInfoPanel() {
-    app.infoPanelOpen  = true;
-    app.panelShownOnce = true;
-    var panel = document.getElementById('info-panel');
-    if (panel) panel.classList.add('open');
-  }
-
-  function closeInfoPanel() {
-    app.infoPanelOpen = false;
-    var panel = document.getElementById('info-panel');
-    if (panel) panel.classList.remove('open');
-  }
-  /* Expõe para o onclick no HTML */
-  window.closeInfoPanel = closeInfoPanel;
-
-  /* ─────────────────────────────────────────────
-     Botão INICIAR
-     ───────────────────────────────────────────── */
-  /* ─────────────────────────────────────────────
-     Exibe erro de GPS na tela inicial com instruções
-     ───────────────────────────────────────────── */
-  function showGpsError(err) {
-    var btn  = document.getElementById('start-btn');
-    var hint = document.querySelector('.ss-hint');
-
-    var msgs = {
-      1: '🔒 Acesso ao GPS negado.\nToque no ícone 🔒 na barra do navegador → "Permissões" → ative Localização. Depois recarregue a página.',
-      2: '📡 Posição indisponível. Verifique se o GPS do dispositivo está ativado nas configurações do celular.',
-      3: '⏱ Tempo esgotado ao obter GPS. Certifique-se de estar ao ar livre e tente novamente.'
-    };
-    var code = err && err.code ? err.code : 0;
-    var msg  = msgs[code] || '❌ Não foi possível acessar o GPS. Verifique as permissões do navegador.';
-
-    if (hint) {
-      hint.style.color        = '#ff6b6b';
-      hint.style.fontWeight   = '600';
-      hint.style.lineHeight   = '1.6';
-      hint.textContent        = msg;
-    }
-    if (btn) {
-      btn.textContent = '↺  Tentar novamente';
-      btn.style.background = 'linear-gradient(130deg, #555, #777)';
-      btn.style.boxShadow  = 'none';
-    }
-    console.warn('[GPS] Erro', code, err && err.message);
-  }
-
-  /* ─────────────────────────────────────────────
-     Botão INICIAR
-     Fluxo: DeviceOrientation → GPS → AR.js → HUD
-     ───────────────────────────────────────────── */
-  document.getElementById('start-btn').addEventListener('click', async function () {
-    var btn = document.getElementById('start-btn');
-
-    /* Restaura visual do botão caso seja uma segunda tentativa */
-    btn.textContent      = '⏳ Aguardando permissões…';
-    btn.disabled         = true;
-    btn.style.background = '';
-    btn.style.boxShadow  = '';
-    var hint = document.querySelector('.ss-hint');
-    if (hint) { hint.style.color = ''; hint.style.fontWeight = ''; hint.textContent = 'Permita o acesso à câmera, localização GPS e sensores de movimento.'; }
-
-    /* 1 ── iOS 13+: permissão de DeviceOrientation (giroscópio/bússola) */
-    if (
-      typeof DeviceOrientationEvent !== 'undefined' &&
-      typeof DeviceOrientationEvent.requestPermission === 'function'
-    ) {
-      try {
-        var perm = await DeviceOrientationEvent.requestPermission();
-        if (perm !== 'granted') {
-          alert('Permissão de orientação negada.\nA seta direcional pode não funcionar corretamente.');
-        }
-      } catch (e) {
-        console.warn('[OrientPerm]', e);
-      }
-    }
-
-    /* 2 ── Solicita GPS dentro do gesto do usuário (garante que o
-            browser exiba o diálogo de permissão)
-            Em debugMode o geolocation já está mockado — pula.        */
-    if (!debugMode) {
-      try {
-        await new Promise(function (resolve, reject) {
-          navigator.geolocation.getCurrentPosition(resolve, reject, {
-            enableHighAccuracy: true,
-            timeout: 15000,
-            maximumAge: 0
-          });
-        });
-      } catch (err) {
-        /* Permissão negada ou GPS indisponível — mostra erro e para */
-        showGpsError(err);
-        btn.disabled = false;
-        return;
-      }
-    }
-
-    /* 3 ── Registra listener de bússola */
-    /* Registra AMBOS os eventos:
-       - deviceorientationabsolute → Android Chrome (alpha relativo ao Norte)
-       - deviceorientation         → iOS Safari (webkitCompassHeading)       */
-    window.addEventListener('deviceorientationabsolute', handleOrientationEvent, true);
-    window.addEventListener('deviceorientation',         handleOrientationEvent, true);
-
-    /* 4 ── Ativa o componente gps-camera do AR.js na câmera
-            (agora que a permissão foi concedida, o watchPosition
-            interno do AR.js vai disparar com o diálogo já aceito)  */
-    var cam = document.getElementById('ar-camera');
-    if (cam) cam.setAttribute('gps-camera', '');
-
-    /* 5 ── Troca tela inicial → HUD */
-    document.getElementById('start-screen').style.display = 'none';
-    document.getElementById('hud').style.display = 'block';
-
-    /* 6 ── Inicia nosso próprio watcher (cálculos de HUD) */
-    setStatus('Aguardando GPS…', 'warn');
-    startGPS();
-
-    /* 7 ── Ajustes do modo debug */
-    if (debugMode) {
-      document.getElementById('debug-hud-badge').style.display = 'block';
-      setStatus('Simulação ativa — ' + DEBUG_SIM_DISTANCE + 'm do monumento', 'warn');
-      if (!app.compassAvailable) app.compassHeading = 0;
-      if (window._googleMapsReady) runCalculations();
-      else window._pendingCalc = runCalculations;
-    }
-  });
-
-  /* ─────────────────────────────────────────────
-     Inicialização de UI condicional ao debugMode
-     ───────────────────────────────────────────── */
-  if (debugMode) {
-    document.getElementById('debug-start-badge').style.display = 'block';
-  }
-</script>
-
+        <a-camera gps-camera rotation-reader></a-camera>
+    </a-scene>
 </body>
 </html>
