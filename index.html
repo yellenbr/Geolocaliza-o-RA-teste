@@ -14,16 +14,16 @@
 
     <style>
         * { box-sizing: border-box; }
-        body { margin: 0; overflow: hidden; font-family: sans-serif; background: #000; }
+        body { margin: 0; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #000; }
 
         /* ── Botão de permissão da bússola (iOS) ── */
         #btn-permissao {
-            display: none; /* aparece só se necessário */
+            display: none;
             position: absolute;
             top: 50%; left: 50%;
             transform: translate(-50%, -50%);
             z-index: 3000;
-            background: #00E5FF;
+            background: #4BD4D2;
             color: #000;
             font-size: 16px;
             font-weight: bold;
@@ -31,42 +31,7 @@
             border: none;
             border-radius: 28px;
             cursor: pointer;
-            box-shadow: 0 0 20px rgba(0,229,255,0.6);
-        }
-
-        /* ── Seta de direção ── */
-        #nav-overlay {
-            position: absolute;
-            top: 7%; left: 50%;
-            transform: translateX(-50%);
-            z-index: 1000;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            pointer-events: none;
-        }
-        #arrow-circle {
-            width: 96px; height: 96px;
-            background: rgba(0,0,0,0.5);
-            border-radius: 50%;
-            border: 2px solid rgba(0,229,255,0.6);
-            backdrop-filter: blur(6px);
-            display: flex; align-items: center; justify-content: center;
-        }
-        #direction-svg {
-            width: 64px; height: 64px;
-            /* sem transition — atualização em tempo real, suavização via JS */
-            filter: drop-shadow(0 0 7px #00E5FF);
-        }
-        #nav-label {
-            margin-top: 7px;
-            color: #fff;
-            font-size: 13px;
-            font-weight: bold;
-            background: rgba(0,0,0,0.55);
-            padding: 4px 14px;
-            border-radius: 12px;
-            backdrop-filter: blur(6px);
+            box-shadow: 0 0 20px rgba(75,212,210,0.6);
         }
 
         /* ── Status GPS / Bússola (canto superior esquerdo) ── */
@@ -85,28 +50,88 @@
             backdrop-filter: blur(4px);
             color: #aaa;
         }
-        .status-pill.ok { color: #00E5FF; }
+        .status-pill.ok { color: #4BD4D2; }
 
-        /* ── Mapa inferior ── */
-        #ui-layer {
-            position: absolute; bottom: 0; left: 0;
-            width: 100%; height: 40vh;
-            display: flex; justify-content: center; align-items: flex-end;
+        /* ── HUD Superior (estilo HyperAR) ── */
+        #nav-overlay {
+            position: absolute;
+            top: 40px; left: 50%;
+            transform: translateX(-50%);
             z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            pointer-events: none;
+            gap: 10px;
         }
-        .map-card {
-            width: 92%; height: 90%; margin-bottom: 15px;
-            background: rgba(15,15,15,0.8);
-            backdrop-filter: blur(12px);
-            border-radius: 28px;
-            border: 1px solid rgba(255,255,255,0.1);
-            display: flex; flex-direction: column; overflow: hidden;
+        #arrow-circle {
+            width: 72px; height: 72px;
+            background: #4BD4D2;
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            box-shadow: 0 4px 20px rgba(75,212,210,0.55);
         }
-        #map-canvas { flex-grow: 1; width: 100%; }
-        .info-bar {
-            color: white; padding: 10px 14px;
-            text-align: center; font-size: 13px; font-weight: bold;
+        #direction-svg {
+            width: 38px; height: 38px;
+            /* sem transition — suavização via JS */
         }
+        #nav-pill {
+            background: #fff;
+            border-radius: 24px;
+            padding: 8px 20px;
+            box-shadow: 0 2px 14px rgba(0,0,0,0.18);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            color: #222;
+            white-space: nowrap;
+        }
+        #nav-pill .sep { color: #ccc; }
+        #nav-pill #time-text { color: #555; font-weight: 500; }
+
+        /* ── Bottom Sheet (gaveta do mapa) ── */
+        #bottom-sheet {
+            position: absolute;
+            bottom: 0; left: 0;
+            width: 100%; height: 40vh;
+            background: #fff;
+            border-radius: 40px 40px 0 0;
+            z-index: 1000;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 -6px 28px rgba(0,0,0,0.20);
+        }
+        #map-canvas {
+            flex: 1;
+            width: 100%;
+        }
+
+        /* ── Bottom Navigation Bar ── */
+        #bottom-nav {
+            background: #fff;
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            padding: 10px 0 16px;
+            border-top: 1px solid #f0f0f0;
+            flex-shrink: 0;
+        }
+        .nav-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 3px;
+            font-size: 11px;
+            font-weight: 600;
+            color: #bbb;
+            cursor: pointer;
+            user-select: none;
+        }
+        .nav-item.active { color: #2979FF; }
+        .nav-item svg { width: 24px; height: 24px; }
     </style>
 </head>
 <body>
@@ -122,34 +147,81 @@
         <span class="status-pill" id="st-bus">Bussola...</span>
     </div>
 
-    <!-- Seta AR -->
+    <!-- HUD Superior -->
     <div id="nav-overlay">
         <div id="arrow-circle">
-            <svg id="direction-svg" viewBox="0 0 60 60">
-                <rect x="26" y="24" width="8" height="32" rx="3" fill="#00E5FF"/>
-                <polygon points="30,3 44,28 16,28" fill="#00E5FF"/>
+            <svg id="direction-svg" viewBox="0 0 40 40" fill="none">
+                <!-- Seta para cima (chevron + haste) -->
+                <polygon points="20,3 33,20 24,20 24,37 16,37 16,20 7,20" fill="white"/>
             </svg>
         </div>
-        <div id="nav-label">Aguardando GPS...</div>
+        <div id="nav-pill">
+            <span id="dist-text">Aguardando GPS...</span>
+            <span class="sep" id="pill-sep" style="display:none">·</span>
+            <span id="time-text" style="display:none"></span>
+        </div>
     </div>
 
-    <!-- Mapa -->
-    <div id="ui-layer">
-        <div class="map-card">
-            <div id="map-canvas"></div>
-            <div class="info-bar" id="dist-info">Calculando rota...</div>
+    <!-- Bottom Sheet: Mapa + Barra de Navegação -->
+    <div id="bottom-sheet">
+        <div id="map-canvas"></div>
+        <div id="bottom-nav">
+            <!-- Mapa (ativo) -->
+            <div class="nav-item active">
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M20.5 3l-.16.03L15 5.1 9 3 3.36 4.9c-.21.07-.36.25-.36.48V20.5c0 .28.22.5.5.5l.16-.03L9 18.9l6 2.1 5.64-1.9c.21-.07.36-.25.36-.48V3.5c0-.28-.22-.5-.5-.5zM15 19l-6-2.11V5l6 2.11V19z"/>
+                </svg>
+                Mapa
+            </div>
+            <!-- QR Code -->
+            <div class="nav-item">
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M3 11h2v2H3zm0 4h2v2H3zm4-4h2v2H7zm0 4h2v2H7zm4-8h2v2h-2zm0 8h2v2h-2zm4-8h2v2h-2zm4 4h2v2h-2zm0-4h2v2h-2zm-4 4h2v2h-2zm4 4h2v2h-2zM3 3h8v8H3zm2 2v4h4V5zm8-2h8v8h-8zm2 2v4h4V5zM3 13h8v8H3zm2 2v4h4v-4z"/>
+                </svg>
+                QR Code
+            </div>
+            <!-- Libras -->
+            <div class="nav-item">
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M21 7c0-1.38-1.12-2.5-2.5-2.5-.23 0-.46.03-.67.08L14 3c0-1.1-.9-2-2-2s-2 .9-2 2v8.8L8.87 10.6c-.64-.64-1.56-.84-2.39-.55l-.01.01C5.53 10.4 5 11.27 5 12.2c0 .56.22 1.08.62 1.48L9.87 18c1.12 1.12 2.64 1.75 4.23 1.75H16c3.31 0 5-2.47 5-5V7z"/>
+                </svg>
+                Libras
+            </div>
         </div>
     </div>
 
     <!-- Cena AR -->
     <a-scene vr-mode-ui="enabled: false" arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;">
-        <a-entity gps-entity-place="latitude: -10.968111; longitude: -37.059889;">
-            <a-cone color="#00E5FF" radius-bottom="0.6" radius-top="0" height="2.5"
-                    position="0 4 0"
-                    material="emissive: #00E5FF; emissiveIntensity: 0.5;"></a-cone>
-            <a-box color="#FF6B35" scale="2 2 2" position="0 1 0"
-                   material="emissive: #FF6B35; emissiveIntensity: 0.4;"></a-box>
+
+        <!-- Pin de Destino (esfera vermelha + haste + ponta cônica — animação flutuante) -->
+        <a-entity id="dest-pin" gps-entity-place="latitude: -10.968111; longitude: -37.059889;">
+            <a-sphere color="#E53935" radius="0.55" position="0 6.2 0"
+                      material="emissive: #E53935; emissiveIntensity: 0.45;">
+                <a-animation attribute="position"
+                             from="0 6.2 0" to="0 6.95 0"
+                             direction="alternate" dur="1500"
+                             repeat="indefinite" easing="ease-in-out-sine">
+                </a-animation>
+            </a-sphere>
+            <a-cylinder color="#E53935" radius="0.09" height="5" position="0 3.5 0"
+                        material="emissive: #E53935; emissiveIntensity: 0.3;">
+                <a-animation attribute="position"
+                             from="0 3.5 0" to="0 3.88 0"
+                             direction="alternate" dur="1500"
+                             repeat="indefinite" easing="ease-in-out-sine">
+                </a-animation>
+            </a-cylinder>
+            <a-cone color="#E53935" radius-bottom="0.55" radius-top="0" height="1"
+                    position="0 0.5 0" rotation="0 0 180"
+                    material="emissive: #E53935; emissiveIntensity: 0.3;">
+                <a-animation attribute="position"
+                             from="0 0.5 0" to="0 0.88 0"
+                             direction="alternate" dur="1500"
+                             repeat="indefinite" easing="ease-in-out-sine">
+                </a-animation>
+            </a-cone>
         </a-entity>
+
         <a-camera gps-camera rotation-reader></a-camera>
     </a-scene>
 
@@ -243,39 +315,16 @@
     }
 
     // ────────────────────────────────────────────────
-    // SETA DE DIREÇÃO
+    // HUD SETA 2D — aponta apenas a direção relativa
     // ────────────────────────────────────────────────
     function atualizarSeta() {
         if (!currentPos) return;
 
-        const bearing    = calcBearing(currentPos, DEST);
+        const bearing     = calcBearing(currentPos, DEST);
         const angRelativo = (bearing - heading + 360) % 360;
-        const dist        = calcDistancia(currentPos, DEST);
 
         document.getElementById('direction-svg').style.transform =
             `rotate(${angRelativo}deg)`;
-
-        let label;
-        if (dist < 15) {
-            label = 'Chegou ao destino!';
-        } else if (angRelativo <= 22 || angRelativo >= 338) {
-            label = 'Siga em frente';
-        } else if (angRelativo < 67) {
-            label = 'Vire um pouco a direita';
-        } else if (angRelativo <= 112) {
-            label = 'Vire a direita';
-        } else if (angRelativo < 157) {
-            label = 'Vire bastante a direita';
-        } else if (angRelativo <= 202) {
-            label = 'Retorne';
-        } else if (angRelativo < 247) {
-            label = 'Vire bastante a esquerda';
-        } else if (angRelativo <= 292) {
-            label = 'Vire a esquerda';
-        } else {
-            label = 'Vire um pouco a esquerda';
-        }
-        document.getElementById('nav-label').textContent = label;
     }
 
     // ────────────────────────────────────────────────
@@ -305,7 +354,7 @@
                 icon: {
                     path: google.maps.SymbolPath.CIRCLE,
                     scale: 9,
-                    fillColor: '#00E5FF', fillOpacity: 1,
+                    fillColor: '#4BD4D2', fillOpacity: 1,
                     strokeColor: '#ffffff', strokeWeight: 2
                 },
                 title: 'Você'
@@ -329,6 +378,58 @@
     }
 
     // ────────────────────────────────────────────────
+    // TRILHA AR — breadcrumbs no chão (chevrons + plano neon)
+    // ────────────────────────────────────────────────
+    const CHEVRON_SVG = 'data:image/svg+xml,' + encodeURIComponent(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 80">' +
+        '<polygon points="50,4 96,76 50,50 4,76" fill="white" opacity="0.95"/>' +
+        '</svg>'
+    );
+
+    function gerarCaminhoAR(overviewPath) {
+        // Remove trilha anterior
+        document.querySelectorAll('.breadcrumb-ar').forEach(el => el.remove());
+
+        const scene = document.querySelector('a-scene');
+        const PASSO = 4; // amostra a cada 4 pontos da polyline
+
+        for (let i = 0; i < overviewPath.length - 1; i += PASSO) {
+            const pt   = overviewPath[i];
+            const prox = overviewPath[Math.min(i + PASSO, overviewPath.length - 1)];
+
+            const lat = pt.lat();
+            const lng = pt.lng();
+            const bearing = calcBearing(
+                { lat, lng },
+                { lat: prox.lat(), lng: prox.lng() }
+            );
+
+            // Plano azul translúcido (trilha neon no asfalto)
+            const trail = document.createElement('a-plane');
+            trail.classList.add('breadcrumb-ar');
+            trail.setAttribute('gps-entity-place', `latitude: ${lat}; longitude: ${lng}`);
+            trail.setAttribute('width', '1');
+            trail.setAttribute('height', '0.75');
+            trail.setAttribute('position', '0 -1.52 0');
+            trail.setAttribute('rotation', '-90 0 0');
+            trail.setAttribute('material', 'color: #2979FF; transparent: true; opacity: 0.38; side: double');
+            scene.appendChild(trail);
+
+            // Seta (chevron) branca deitada no chão apontando para o próximo ponto
+            const arrow = document.createElement('a-image');
+            arrow.classList.add('breadcrumb-ar');
+            arrow.setAttribute('gps-entity-place', `latitude: ${lat}; longitude: ${lng}`);
+            arrow.setAttribute('src', CHEVRON_SVG);
+            arrow.setAttribute('width', '1.1');
+            arrow.setAttribute('height', '0.85');
+            arrow.setAttribute('position', '0 -1.48 0');
+            arrow.setAttribute('rotation', `-90 ${bearing} 0`);
+            arrow.setAttribute('material', 'transparent: true; opacity: 0.92; side: double');
+            scene.appendChild(arrow);
+        }
+    }
+
+    // ────────────────────────────────────────────────
     // MAPA E ROTA
     // ────────────────────────────────────────────────
     function initNavigation() {
@@ -340,8 +441,15 @@
         directionsService  = new google.maps.DirectionsService();
         directionsRenderer = new google.maps.DirectionsRenderer({
             map,
-            suppressMarkers: false,
-            polylineOptions: { strokeColor: '#00E5FF', strokeWeight: 5 }
+            suppressMarkers: true,   // oculta A e B — o ponto ciano já indica você
+            polylineOptions: { strokeColor: '#4BD4D2', strokeWeight: 5 }
+        });
+
+        // Marcador fixo do destino (B)
+        new google.maps.Marker({
+            position: DEST,
+            map,
+            title: 'Destino'
         });
 
         // GPS
@@ -370,8 +478,15 @@
             if (status === 'OK') {
                 directionsRenderer.setDirections(response);
                 const leg = response.routes[0].legs[0];
-                document.getElementById('dist-info').innerText =
-                    `${leg.distance.text}  ·  ~${leg.duration.text} a pe`;
+
+                // Atualiza pílula do HUD com distância e tempo
+                document.getElementById('dist-text').textContent = leg.distance.text;
+                document.getElementById('time-text').textContent = `~${leg.duration.text} a pé`;
+                document.getElementById('pill-sep').style.display = 'inline';
+                document.getElementById('time-text').style.display  = 'inline';
+
+                // Gera trilha 3D de chevrons no chão
+                gerarCaminhoAR(response.routes[0].overview_path);
             }
         });
     }
